@@ -2,6 +2,7 @@
 
 namespace Rocket\ORM;
 
+use JsonSerializable;
 use Rocket\Metadata\EntityMetadata;
 use Rocket\Metadata\RelationMetadata;
 use Rocket\Connection\Connection;
@@ -10,7 +11,7 @@ use Rocket\Relations\HasOne;
 use Rocket\Relations\HasMany;
 use Rocket\Relations\BelongsTo;
 
-abstract class Entity
+abstract class Entity implements JsonSerializable
 {
   /**
    * Cache for entity metadata
@@ -560,5 +561,14 @@ abstract class Entity
     }
 
     return $data;
+  }
+
+  /**
+   * Serialize the entity to JSON
+   * This method is called automatically by json_encode()
+   */
+  public function jsonSerialize(): array
+  {
+    return $this->toArray();
   }
 }
