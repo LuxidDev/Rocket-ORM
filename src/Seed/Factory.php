@@ -74,7 +74,7 @@ abstract class Factory
   public function make(array $attributes = []): Entity
   {
     $this->attributes = $attributes;
-    $data = $this->definition();
+    $data = array_merge($this->definition(), $attributes);
 
     // Apply states
     foreach ($this->states as $state) {
@@ -87,7 +87,7 @@ abstract class Factory
     $entity = new $this->entityClass();
     $entity->load($data);
 
-    return $entity;
+    return $this->entityClass::create($data);
   }
 
   abstract protected function definition(): array;

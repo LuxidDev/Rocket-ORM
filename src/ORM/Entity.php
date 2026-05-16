@@ -50,6 +50,68 @@ abstract class Entity implements JsonSerializable
     }
   }
 
+  public static function create(array $data): ?static
+  {
+      $entity = new static();
+      $metadata = static::getMetadata();
+
+      // Only set properties that are database columns
+      foreach ($metadata->getColumns() as $column) {
+          $property = $column->getProperty();
+
+          // Skip system-managed fields
+          if ($column->isPrimary() && $column->isAutoIncrement()) {
+              continue;
+          }
+
+          if ($column->isAutoCreate()) {
+              continue;
+          }
+
+          // Set from input data if present
+          if (array_key_exists($property, $data)) {
+              $entity->$property = $data[$property];
+          }
+      }
+
+      // Validate using existing rules
+      if (!$entity->validate()) {
+          return null;
+      }
+
+      // Save automatically
+      $entity->save();
+      return $entity;
+  }
+
+  public function update(array $data): bool
+  {
+      $metadata = static::getMetadata();
+
+      foreach ($metadata->getColumns() as $column) {
+          $property = $column->getProperty();
+
+          // Never update primary key or auto fields
+          if ($column->isPrimary() && $column->isAutoIncrement()) {
+              continue;
+          }
+
+          if ($column->isAutoCreate() || $column->isAutoUpdate()) {
+              continue;
+          }
+
+          if (array_key_exists($property, $data)) {
+              $this->$property = $data[$property];
+          }
+      }
+
+      if (!$this->validate()) {
+          return false;
+      }
+
+      return $this->save();
+  }
+
   /**
    * Get entity metadata (parsed from attributes)
    */
