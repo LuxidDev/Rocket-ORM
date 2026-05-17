@@ -23,4 +23,9 @@ class CreateResult
     {
         return json_encode($this->errors ?? []);
     }
+
+    public function getEntity(): ?Entity
+    {
+        return $this->entity;
+    }
 }
