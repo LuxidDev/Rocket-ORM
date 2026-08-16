@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.3.1
+
+Performance, plus three correctness bugs the new integration tests exposed.
+
+### Fixed
+
+- **Every insert, update and delete ran twice.** The internal statement runner
+  already executed, and `insert()`, `update()` and `delete()` executed the
+  returned statement again — so a single `save()` wrote two rows. Only reachable
+  against a real database, which is why the unit suite never saw it.
+- **A closure mixing `where()` and `orWhere()` matched nothing.** Conditions were
+  collected into separate AND and OR buckets, which cannot express the order the
+  caller wrote, so `where('a')->orWhere('b')` inside a closure rendered as
+  `(a AND (b))`. Conditions are now one ordered list. At the top level,
+  `where('a', 1)->orWhere('b', 2)` renders as `a OR b` rather than `a AND (b)`.
+- **Entities read through the query builder stayed flagged as new**, so saving
+  one issued an INSERT and silently duplicated the record. Only `findOne()` and
+  `findAll()` corrected the flag; `query()->all()` and `->first()` did not.
+
+### Performance
+
+- **Column metadata is flattened into lookup maps.** Hydrating, serializing and
+  diffing walked the `ColumnMetadata` objects and called getters per field per
+  row. Hydrating 100 rows went from ~223µs to ~71µs.
+- **Result sets hydrate in one pass.** `load()` followed by `syncOriginal()`
+  walked every column twice; `hydrate()` assigns and snapshots together, and
+  `hydrateMany()` resolves the column map once for the whole set. The full
+  100-row path went from ~323µs to ~103µs.
+- **Entity attributes parse in a single reflection pass.** Columns, rules and
+  relations each used to scan every property's attributes separately. Building
+  metadata for an entity went from ~23µs to ~17µs.
+- **Entity construction short-circuits** when no column declares a default:
+  ~702ns to ~213ns.
+- **Identifier validation is memoized** and per-binding regex removed. Building a
+  simple query went from ~1.33µs to ~1.05µs.
+
+### Added
+
+- `Entity::hydrate()` and `Entity::hydrateMany()`.
+- `QueryBuilder::getConditions()`, returning conditions with their connectors.
+- `Connection::ConnectionException` is thrown for connection failures.
+
 ## 0.3.0
 
 Pre-release. Several fixes change behaviour on purpose; they are listed first.
