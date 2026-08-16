@@ -30,6 +30,15 @@ class QueryBuilder
     private const OPERATORS = ['=', '!=', '<>', '<', '<=', '>', '>=', 'LIKE', 'NOT LIKE', 'IS', 'IS NOT'];
 
     /**
+     * The same operators as a lookup set, so validation is a hash hit.
+     */
+    private const OPERATOR_SET = [
+        '=' => true, '!=' => true, '<>' => true, '<' => true, '<=' => true,
+        '>' => true, '>=' => true, 'LIKE' => true, 'NOT LIKE' => true,
+        'IS' => true, 'IS NOT' => true,
+    ];
+
+    /**
      * Sort directions permitted in an ORDER BY clause.
      *
      * @var list<string>
@@ -43,6 +52,13 @@ class QueryBuilder
      * overwrote the parent's when merged, silently changing the query's meaning.
      */
     private static int $parameterSequence = 0;
+
+    /**
+     * Identifiers already validated, mapped to their trimmed form.
+     *
+     * @var array<string, string>
+     */
+    private static array $validIdentifiers = [];
 
     /**
      * Entity class rows hydrate into.
@@ -551,7 +567,7 @@ class QueryBuilder
     {
         $column = $this->assertIdentifier($column);
 
-        return sprintf('%s %s :%s', $column, $operator, $this->bind($column, $value));
+        return $column . ' ' . $operator . ' :' . $this->bind($column, $value);
     }
 
     /**
@@ -571,13 +587,19 @@ class QueryBuilder
             return ['=', $operator];
         }
 
-        $operator = strtoupper(trim((string) $operator));
+        // Symbolic operators are already canonical; only word operators such as
+        // `like` need normalising.
+        if (isset(self::OPERATOR_SET[$operator])) {
+            return [$operator, $value];
+        }
 
-        if (!in_array($operator, self::OPERATORS, true)) {
+        $normalized = strtoupper(trim((string) $operator));
+
+        if (!isset(self::OPERATOR_SET[$normalized])) {
             throw new \InvalidArgumentException(sprintf('Unsupported operator "%s"', $operator));
         }
 
-        return [$operator, $value];
+        return [$normalized, $value];
     }
 
     /**
@@ -590,11 +612,9 @@ class QueryBuilder
      */
     private function bind(string $hint, mixed $value): string
     {
-        $name = sprintf(
-            'p%d_%s',
-            ++self::$parameterSequence,
-            preg_replace('/[^A-Za-z0-9_]/', '_', $hint)
-        );
+        // The hint is always an identifier this class already validated, so the
+        // only character needing replacement is the qualifier dot.
+        $name = 'p' . (++self::$parameterSequence) . '_' . strtr($hint, '.', '_');
 
         $this->bindings[$name] = $value;
 
@@ -613,17 +633,24 @@ class QueryBuilder
      */
     private function assertIdentifier(string $identifier): string
     {
-        $identifier = trim($identifier);
-
-        if ($identifier === '*') {
-            return $identifier;
+        // Applications reuse the same handful of column names on every request,
+        // so the pattern is matched once per distinct identifier rather than
+        // once per call.
+        if (isset(self::$validIdentifiers[$identifier])) {
+            return self::$validIdentifiers[$identifier];
         }
 
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $identifier) !== 1) {
+        $trimmed = trim($identifier);
+
+        if ($trimmed === '*') {
+            return self::$validIdentifiers[$identifier] = '*';
+        }
+
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $trimmed) !== 1) {
             throw new \InvalidArgumentException(sprintf('Invalid SQL identifier "%s"', $identifier));
         }
 
-        return $identifier;
+        return self::$validIdentifiers[$identifier] = $trimmed;
     }
 
     /**
