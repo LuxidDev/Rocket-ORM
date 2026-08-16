@@ -288,9 +288,47 @@ abstract class Entity implements JsonSerializable
      */
     public static function hydrate(array $row): static
     {
-        $entity = new static();
+        return static::hydrateWith($row, static::getMetadata()->columnToProperty());
+    }
+
+    /**
+     * Build many entities from a result set.
+     *
+     * Resolves the column map once for the whole set rather than per row.
+     *
+     * @param list<array<string, mixed>> $rows Rows keyed by column name
+     *
+     * @return list<static>
+     */
+    public static function hydrateMany(array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
         $map = static::getMetadata()->columnToProperty();
+        $entities = [];
+
+        foreach ($rows as $row) {
+            $entities[] = static::hydrateWith($row, $map);
+        }
+
+        return $entities;
+    }
+
+    /**
+     * Build one entity from a row using an already-resolved column map.
+     *
+     * @param array<string, mixed>  $row Row keyed by column name
+     * @param array<string, string> $map Property name keyed by column name
+     *
+     * @return static
+     */
+    protected static function hydrateWith(array $row, array $map): static
+    {
+        $entity = new static();
         $original = [];
+        $mapped = 0;
 
         foreach ($row as $key => $value) {
             $property = $map[$key] ?? null;
@@ -298,6 +336,7 @@ abstract class Entity implements JsonSerializable
             if ($property !== null) {
                 $entity->$property = $value;
                 $original[$property] = $value;
+                ++$mapped;
 
                 continue;
             }
@@ -307,11 +346,13 @@ abstract class Entity implements JsonSerializable
             }
         }
 
-        // Columns the query did not select still need a snapshot entry, or they
-        // would look dirty the first time the entity is saved.
-        foreach ($map as $property) {
-            if (!array_key_exists($property, $original)) {
-                $original[$property] = isset($entity->$property) ? $entity->$property : null;
+        // A partial select leaves columns unsnapshotted, and those would look
+        // dirty on the next save. A full row needs no second pass at all.
+        if ($mapped !== count($map)) {
+            foreach ($map as $property) {
+                if (!array_key_exists($property, $original)) {
+                    $original[$property] = isset($entity->$property) ? $entity->$property : null;
+                }
             }
         }
 

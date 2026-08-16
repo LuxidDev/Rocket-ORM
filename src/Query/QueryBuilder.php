@@ -432,15 +432,11 @@ class QueryBuilder
      */
     public function all(): array
     {
-        $rows = Connection::getInstance()->query($this->buildSelect(), $this->bindings);
         $entityClass = $this->entityClass;
-        $entities = [];
 
-        foreach ($rows as $row) {
-            $entities[] = $entityClass::hydrate($row);
-        }
-
-        return $entities;
+        return $entityClass::hydrateMany(
+            Connection::getInstance()->query($this->buildSelect(), $this->bindings)
+        );
     }
 
     /**
