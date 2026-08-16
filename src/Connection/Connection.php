@@ -195,7 +195,9 @@ class Connection
             implode(', ', array_map(static fn (string $c): string => ':' . $c, $columns))
         );
 
-        return $this->bound($sql, $data)->execute();
+        $this->run($sql, $data);
+
+        return true;
     }
 
     /**
@@ -235,7 +237,9 @@ class Connection
             $bindings['where_' . $column] = $value;
         }
 
-        return $this->bound($sql, $bindings)->execute();
+        $this->run($sql, $bindings);
+
+        return true;
     }
 
     /**
@@ -262,7 +266,9 @@ class Connection
             implode(' AND ', array_map(static fn (string $c): string => $c . ' = :' . $c, $conditions))
         );
 
-        return $this->bound($sql, $where)->execute();
+        $this->run($sql, $where);
+
+        return true;
     }
 
     /**
@@ -275,7 +281,7 @@ class Connection
      */
     public function query(string $sql, array $params = []): array
     {
-        return $this->bound($sql, $params)->fetchAll();
+        return $this->run($sql, $params)->fetchAll();
     }
 
     /**
@@ -286,20 +292,23 @@ class Connection
      */
     public function execute(string $sql, array $params = []): int
     {
-        return $this->bound($sql, $params)->rowCount();
+        return $this->run($sql, $params)->rowCount();
     }
 
     /**
-     * Prepare, bind and execute a statement.
+     * Prepare, bind and execute a statement, returning it for reading.
      *
      * Values are bound individually rather than passed to `execute()` so nulls,
      * booleans and integers keep their type once emulation is off. Placeholder
      * keys may be written with or without a leading colon.
      *
+     * This method executes; callers must not execute the returned statement
+     * again. Doing so ran every insert, update and delete twice.
+     *
      * @param string               $sql    SQL with named placeholders
      * @param array<string, mixed> $params Placeholder values
      */
-    protected function bound(string $sql, array $params): PDOStatement
+    protected function run(string $sql, array $params): PDOStatement
     {
         $statement = $this->pdo->prepare($sql);
 
