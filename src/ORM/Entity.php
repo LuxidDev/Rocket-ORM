@@ -38,14 +38,23 @@ abstract class Entity implements JsonSerializable
      */
     protected array $relations = [];
 
+    /**
+     * Apply the defaults declared on this entity's columns.
+     *
+     * Most entities declare their defaults as PHP property initialisers, so the
+     * precomputed map is usually empty and construction does no work at all.
+     */
     public function __construct()
     {
-        // Initialize any default values
-        $metadata = static::getMetadata();
-        foreach ($metadata->getColumns() as $column) {
-            $property = $column->getProperty();
-            if ($column->getDefault() !== null && !isset($this->$property)) {
-                $this->$property = $column->getDefault();
+        $defaults = static::getMetadata()->defaults();
+
+        if ($defaults === []) {
+            return;
+        }
+
+        foreach ($defaults as $property => $default) {
+            if (!isset($this->$property)) {
+                $this->$property = $default;
             }
         }
     }
@@ -244,19 +253,18 @@ abstract class Entity implements JsonSerializable
      */
     public function load(array $data): self
     {
-        $metadata = static::getMetadata();
+        $map = static::getMetadata()->columnToProperty();
 
-        foreach ($metadata->getColumns() as $column) {
-            $name = $column->getName();
-
-            if (array_key_exists($name, $data)) {
-                $this->{$column->getProperty()} = $data[$name];
-            }
-        }
-
-        // Preserve any extra selected columns that are not mapped, such as
-        // aggregates produced by a custom select.
         foreach ($data as $key => $value) {
+            $property = $map[$key] ?? null;
+
+            if ($property !== null) {
+                $this->$property = $value;
+                continue;
+            }
+
+            // Keep any extra selected column that happens to match a property,
+            // such as an aggregate produced by a custom select.
             if (property_exists($this, $key)) {
                 $this->$key = $value;
             }
@@ -297,18 +305,17 @@ abstract class Entity implements JsonSerializable
     public function getDirty(): array
     {
         $dirty = [];
+        $original = $this->original;
 
-        foreach (static::getMetadata()->getColumns() as $column) {
-            $property = $column->getProperty();
-
-            if (!array_key_exists($property, $this->original)) {
+        foreach (static::getMetadata()->propertyToColumn() as $property => $column) {
+            if (!array_key_exists($property, $original)) {
                 continue;
             }
 
-            $current = $this->readProperty($property);
+            $current = isset($this->$property) ? $this->$property : null;
 
-            if ($this->original[$property] !== $current) {
-                $dirty[$column->getName()] = $current;
+            if ($original[$property] !== $current) {
+                $dirty[$column] = $current;
             }
         }
 
@@ -493,12 +500,13 @@ abstract class Entity implements JsonSerializable
      */
     protected function syncOriginal(): void
     {
-        $metadata = static::getMetadata();
+        $original = [];
 
-        foreach ($metadata->getColumns() as $column) {
-            $property = $column->getProperty();
-            $this->original[$property] = $this->readProperty($property);
+        foreach (static::getMetadata()->propertyToColumn() as $property => $column) {
+            $original[$property] = isset($this->$property) ? $this->$property : null;
         }
+
+        $this->original = $original;
     }
 
     /**
@@ -507,12 +515,10 @@ abstract class Entity implements JsonSerializable
     public function validate(): bool
     {
         $this->errors = [];
-        $metadata = static::getMetadata();
 
-        foreach ($metadata->getColumns() as $column) {
-            $property = $column->getProperty();
-            $value = $this->readProperty($property);
-            $rules = $column->getRules();
+        // Only columns that actually declare a rule are visited.
+        foreach (static::getMetadata()->rulesByProperty() as $property => $rules) {
+            $value = isset($this->$property) ? $this->$property : null;
 
             foreach ($rules as $rule) {
                 if (!$rule->validate($value, $this)) {
@@ -521,7 +527,7 @@ abstract class Entity implements JsonSerializable
             }
         }
 
-        return empty($this->errors);
+        return $this->errors === [];
     }
 
     /**
@@ -700,15 +706,10 @@ abstract class Entity implements JsonSerializable
      */
     public function toArray(): array
     {
-        $metadata = static::getMetadata();
         $data = [];
 
-        foreach ($metadata->getColumns() as $column) {
-            $property = $column->getProperty();
-
-            if (!$column->isHidden()) {
-                $data[$column->getName()] = $this->readProperty($property);
-            }
+        foreach (static::getMetadata()->visibleColumns() as $property => $column) {
+            $data[$column] = isset($this->$property) ? $this->$property : null;
         }
 
         return $data;
