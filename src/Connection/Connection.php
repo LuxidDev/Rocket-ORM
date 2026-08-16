@@ -28,6 +28,13 @@ class Connection
     protected static ?Connection $instance = null;
 
     /**
+     * Configuration to open the shared connection from, on first use.
+     *
+     * @var array<string, mixed>|null
+     */
+    protected static ?array $pendingConfig = null;
+
+    /**
      * The underlying PDO handle.
      */
     protected PDO $pdo;
@@ -57,25 +64,52 @@ class Connection
      */
     public static function getInstance(?array $config = null): self
     {
-        if (self::$instance === null) {
-            if ($config === null) {
-                throw new \RuntimeException('Connection not initialized. Call initialize() first.');
-            }
-
-            self::$instance = new self($config);
+        if (self::$instance !== null) {
+            return self::$instance;
         }
 
-        return self::$instance;
+        $config ??= self::$pendingConfig;
+
+        if ($config === null) {
+            throw new \RuntimeException('Connection not configured. Call configure() first.');
+        }
+
+        return self::$instance = new self($config);
     }
 
     /**
-     * Replace the shared connection.
+     * Record the configuration without opening a connection.
+     *
+     * Connecting eagerly meant an application whose database was unreachable
+     * could not serve even the routes that never touch it, and the failure
+     * surfaced as a stack trace during boot. The socket is opened the first
+     * time a query actually needs it.
+     *
+     * @param array<string, mixed> $config Connection configuration
+     */
+    public static function configure(array $config): void
+    {
+        self::$pendingConfig = $config;
+        self::$instance = null;
+    }
+
+    /**
+     * Open the shared connection immediately.
      *
      * @param array<string, mixed> $config Connection configuration
      */
     public static function initialize(array $config): void
     {
+        self::$pendingConfig = $config;
         self::$instance = new self($config);
+    }
+
+    /**
+     * Check whether a connection has been configured, opened or not.
+     */
+    public static function isConfigured(): bool
+    {
+        return self::$instance !== null || self::$pendingConfig !== null;
     }
 
     /**
@@ -84,6 +118,7 @@ class Connection
     public static function reset(): void
     {
         self::$instance = null;
+        self::$pendingConfig = null;
     }
 
     /**
