@@ -80,18 +80,16 @@ class QueryBuilder
     protected array $select = ['*'];
 
     /**
-     * Rendered AND conditions.
+     * Rendered conditions in declaration order, each with its connector.
      *
-     * @var list<string>
-     */
-    protected array $where = [];
-
-    /**
-     * Rendered OR conditions.
+     * Kept as one ordered list rather than separate AND and OR buckets. Two
+     * buckets cannot express the order the caller wrote, so a closure mixing
+     * `where()` and `orWhere()` produced `a AND (b)` instead of `a OR b` and
+     * silently matched nothing.
      *
-     * @var list<string>
+     * @var list<array{boolean: string, sql: string}>
      */
-    protected array $orWhere = [];
+    protected array $conditions = [];
 
     /**
      * Rendered ORDER BY terms.
@@ -165,7 +163,7 @@ class QueryBuilder
             $nested = $this->nest($column);
 
             if ($nested !== null) {
-                $this->where[] = $nested;
+                $this->conditions[] = ['boolean' => 'AND', 'sql' => $nested];
             }
 
             return $this;
@@ -173,7 +171,7 @@ class QueryBuilder
 
         [$operator, $value] = $this->normalizeComparison(func_num_args(), $operator, $value);
 
-        $this->where[] = $this->condition($column, $operator, $value);
+        $this->conditions[] = ['boolean' => 'AND', 'sql' => $this->condition($column, $operator, $value)];
 
         return $this;
     }
@@ -193,7 +191,7 @@ class QueryBuilder
             $nested = $this->nest($column);
 
             if ($nested !== null) {
-                $this->orWhere[] = $nested;
+                $this->conditions[] = ['boolean' => 'OR', 'sql' => $nested];
             }
 
             return $this;
@@ -201,7 +199,7 @@ class QueryBuilder
 
         [$operator, $value] = $this->normalizeComparison(func_num_args(), $operator, $value);
 
-        $this->orWhere[] = $this->condition($column, $operator, $value);
+        $this->conditions[] = ['boolean' => 'OR', 'sql' => $this->condition($column, $operator, $value)];
 
         return $this;
     }
@@ -220,7 +218,7 @@ class QueryBuilder
 
         if ($values === []) {
             // An empty IN list is invalid SQL; a contradiction preserves intent.
-            $this->where[] = '1 = 0';
+            $this->conditions[] = ['boolean' => 'AND', 'sql' => '1 = 0'];
 
             return $this;
         }
@@ -231,7 +229,7 @@ class QueryBuilder
             $placeholders[] = ':' . $this->bind($column, $value);
         }
 
-        $this->where[] = sprintf('%s IN (%s)', $column, implode(', ', $placeholders));
+        $this->conditions[] = ['boolean' => 'AND', 'sql' => sprintf('%s IN (%s)', $column, implode(', ', $placeholders))];
 
         return $this;
     }
@@ -258,7 +256,7 @@ class QueryBuilder
             $placeholders[] = ':' . $this->bind($column, $value);
         }
 
-        $this->where[] = sprintf('%s NOT IN (%s)', $column, implode(', ', $placeholders));
+        $this->conditions[] = ['boolean' => 'AND', 'sql' => sprintf('%s NOT IN (%s)', $column, implode(', ', $placeholders))];
 
         return $this;
     }
@@ -276,12 +274,15 @@ class QueryBuilder
     {
         $column = $this->assertIdentifier($column);
 
-        $this->where[] = sprintf(
-            '%s BETWEEN :%s AND :%s',
-            $column,
-            $this->bind($column, $from),
-            $this->bind($column, $to)
-        );
+        $this->conditions[] = [
+            'boolean' => 'AND',
+            'sql' => sprintf(
+                '%s BETWEEN :%s AND :%s',
+                $column,
+                $this->bind($column, $from),
+                $this->bind($column, $to)
+            ),
+        ];
 
         return $this;
     }
@@ -308,7 +309,7 @@ class QueryBuilder
      */
     public function whereNull(string $column): self
     {
-        $this->where[] = $this->assertIdentifier($column) . ' IS NULL';
+        $this->conditions[] = ['boolean' => 'AND', 'sql' => $this->assertIdentifier($column) . ' IS NULL'];
 
         return $this;
     }
@@ -322,7 +323,7 @@ class QueryBuilder
      */
     public function whereNotNull(string $column): self
     {
-        $this->where[] = $this->assertIdentifier($column) . ' IS NOT NULL';
+        $this->conditions[] = ['boolean' => 'AND', 'sql' => $this->assertIdentifier($column) . ' IS NOT NULL'];
 
         return $this;
     }
@@ -339,7 +340,7 @@ class QueryBuilder
      */
     public function whereRaw(string $sql, array $bindings = []): self
     {
-        $this->where[] = '(' . $sql . ')';
+        $this->conditions[] = ['boolean' => 'AND', 'sql' => '(' . $sql . ')'];
         $this->bindings = array_merge($this->bindings, $bindings);
 
         return $this;
@@ -432,12 +433,11 @@ class QueryBuilder
     public function all(): array
     {
         $rows = Connection::getInstance()->query($this->buildSelect(), $this->bindings);
+        $entityClass = $this->entityClass;
         $entities = [];
 
         foreach ($rows as $row) {
-            $entity = new $this->entityClass();
-            $entity->load($row);
-            $entities[] = $entity;
+            $entities[] = $entityClass::hydrate($row);
         }
 
         return $entities;
@@ -500,23 +500,60 @@ class QueryBuilder
     }
 
     /**
-     * Get the rendered AND conditions.
+     * Get the rendered conditions in declaration order.
+     *
+     * @return list<array{boolean: string, sql: string}>
+     */
+    public function getConditions(): array
+    {
+        return $this->conditions;
+    }
+
+    /**
+     * Get the conditions joined with AND.
      *
      * @return list<string>
      */
     public function getWhereConditions(): array
     {
-        return $this->where;
+        return array_values(array_map(
+            static fn (array $c): string => $c['sql'],
+            array_filter($this->conditions, static fn (array $c): bool => $c['boolean'] === 'AND')
+        ));
     }
 
     /**
-     * Get the rendered OR conditions.
+     * Get the conditions joined with OR.
      *
      * @return list<string>
      */
     public function getOrWhereConditions(): array
     {
-        return $this->orWhere;
+        return array_values(array_map(
+            static fn (array $c): string => $c['sql'],
+            array_filter($this->conditions, static fn (array $c): bool => $c['boolean'] === 'OR')
+        ));
+    }
+
+    /**
+     * Join an ordered condition list into a SQL fragment.
+     *
+     * The first condition's connector is dropped, so a list that starts with an
+     * `orWhere()` still renders as a plain leading term.
+     *
+     * @param list<array{boolean: string, sql: string}> $conditions Ordered conditions
+     */
+    private static function renderConditions(array $conditions): string
+    {
+        $sql = '';
+
+        foreach ($conditions as $index => $condition) {
+            $sql .= $index === 0
+                ? $condition['sql']
+                : ' ' . $condition['boolean'] . ' ' . $condition['sql'];
+        }
+
+        return $sql;
     }
 
     /**
@@ -535,23 +572,9 @@ class QueryBuilder
         $callback($nested);
 
         $this->bindings = array_merge($this->bindings, $nested->getBindings());
+        $rendered = self::renderConditions($nested->getConditions());
 
-        $and = $nested->getWhereConditions();
-        $or = $nested->getOrWhereConditions();
-
-        if ($and !== [] && $or !== []) {
-            return '(' . implode(' AND ', $and) . ' AND (' . implode(' OR ', $or) . '))';
-        }
-
-        if ($and !== []) {
-            return '(' . implode(' AND ', $and) . ')';
-        }
-
-        if ($or !== []) {
-            return '(' . implode(' OR ', $or) . ')';
-        }
-
-        return null;
+        return $rendered === '' ? null : '(' . $rendered . ')';
     }
 
     /**
@@ -694,17 +717,8 @@ class QueryBuilder
      */
     protected function buildWhere(): string
     {
-        $conditions = [];
+        $rendered = self::renderConditions($this->conditions);
 
-        if ($this->where !== []) {
-            $conditions[] = implode(' AND ', $this->where);
-        }
-
-        if ($this->orWhere !== []) {
-            $or = implode(' OR ', $this->orWhere);
-            $conditions[] = $conditions === [] ? $or : '(' . $or . ')';
-        }
-
-        return $conditions === [] ? '' : ' WHERE ' . implode(' AND ', $conditions);
+        return $rendered === '' ? '' : ' WHERE ' . $rendered;
     }
 }
