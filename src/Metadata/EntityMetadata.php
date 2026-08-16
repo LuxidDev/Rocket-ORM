@@ -132,6 +132,13 @@ class EntityMetadata
             // Check if it's a validation rule
             if (strpos($attributeName, 'Rocket\\Attributes\\Rules\\') === 0) {
                 $rule = $attribute->newInstance();
+
+                // Attributes cannot see the property they decorate, so rules that
+                // need the mapping are handed it here.
+                if ($rule instanceof \Rocket\Attributes\Rules\ColumnAware) {
+                    $rule->setColumn($columnMetadata->getName(), $property->getName());
+                }
+
                 $columnMetadata->addRule($rule);
             }
         }
