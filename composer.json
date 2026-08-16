@@ -1,48 +1,49 @@
 {
-    "name": "luxid/rocket",
-    "description": "Modern ORM for Luxid Framework with PHP 8 attributes",
-    "type": "library",
-    "license": "MIT",
-    "keywords": [
-        "php",
-        "orm",
-        "database",
-        "mysql",
-        "active-record",
-        "luxid"
-    ],
-    "authors": [
-        {
-            "name": "Jhay",
-            "email": "jhay@luxid.dev"
-        }
-    ],
-    "require": {
-        "php": "^8.1",
-        "ext-pdo": "*",
-        "fakerphp/faker": "^1.23"
-    },
-    "require-dev": {
-        "phpunit/phpunit": "^10.5 || ^11.0"
-    },
-    "autoload": {
-        "psr-4": {
-            "Rocket\\": "src/",
-            "Seeds\\": "seeds/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Rocket\\Tests\\": "tests/"
-        }
-    },
-    "scripts": {
-        "test": "phpunit",
-        "analyse": "phpstan analyse src"
-    },
-    "minimum-stability": "dev",
-    "prefer-stable": true,
-    "config": {
-        "sort-packages": true
+  "name": "luxid/rocket",
+  "description": "Modern ORM for Luxid Framework with PHP 8 attributes",
+  "type": "library",
+  "license": "MIT",
+  "keywords": [
+    "php",
+    "orm",
+    "database",
+    "mysql",
+    "active-record",
+    "luxid"
+  ],
+  "authors": [
+    {
+      "name": "Jhay",
+      "email": "jhay@luxid.dev"
     }
+  ],
+  "require": {
+    "php": "^8.1",
+    "ext-pdo": "*",
+    "fakerphp/faker": "^1.23"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5 || ^11.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Rocket\\": "src/",
+      "Seeds\\": "seeds/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Rocket\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "test": "phpunit",
+    "analyse": "phpstan analyse src"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "config": {
+    "sort-packages": true
+  },
+  "version": "0.3.0"
 }
