@@ -274,6 +274,54 @@ abstract class Entity implements JsonSerializable
     }
 
     /**
+     * Build an entity from a database row.
+     *
+     * Assigns the mapped columns and captures the original snapshot in the same
+     * pass, and marks the entity as persisted. Callers previously loaded the row
+     * and then walked every column again to snapshot it, and several paths
+     * forgot the second step — leaving a row read from the database flagged as
+     * new, so saving it issued an INSERT instead of an UPDATE.
+     *
+     * @param array<string, mixed> $row Row keyed by column name
+     *
+     * @return static
+     */
+    public static function hydrate(array $row): static
+    {
+        $entity = new static();
+        $map = static::getMetadata()->columnToProperty();
+        $original = [];
+
+        foreach ($row as $key => $value) {
+            $property = $map[$key] ?? null;
+
+            if ($property !== null) {
+                $entity->$property = $value;
+                $original[$property] = $value;
+
+                continue;
+            }
+
+            if (property_exists($entity, $key)) {
+                $entity->$key = $value;
+            }
+        }
+
+        // Columns the query did not select still need a snapshot entry, or they
+        // would look dirty the first time the entity is saved.
+        foreach ($map as $property) {
+            if (!array_key_exists($property, $original)) {
+                $original[$property] = isset($entity->$property) ? $entity->$property : null;
+            }
+        }
+
+        $entity->original = $original;
+        $entity->isNew = false;
+
+        return $entity;
+    }
+
+    /**
      * Get the value an attribute held when it was last loaded or saved.
      *
      * @param string $attribute Property name
@@ -574,14 +622,8 @@ abstract class Entity implements JsonSerializable
             $query->where($column, '=', $value);
         }
 
-        $result = $query->first();
-
-        if ($result) {
-            $result->isNew = false;
-            $result->syncOriginal();
-        }
-
-        return $result;
+        // Hydration already snapshots the row and marks it persisted.
+        return $query->first();
     }
 
     /**
@@ -603,14 +645,7 @@ abstract class Entity implements JsonSerializable
             $query->limit($limit);
         }
 
-        $results = $query->all();
-
-        foreach ($results as $result) {
-            $result->isNew = false;
-            $result->syncOriginal();
-        }
-
-        return $results;
+        return $query->all();
     }
 
     /**
