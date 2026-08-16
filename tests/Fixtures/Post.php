@@ -1,6 +1,6 @@
 <?php
 
-namespace Rocket\Tests;
+namespace Rocket\Tests\Fixtures;
 
 use Rocket\ORM\Entity;
 use Rocket\Attributes\Entity as EntityAttr;
