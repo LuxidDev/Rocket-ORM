@@ -9,7 +9,7 @@ class Entity
 {
   protected string $table;
 
-  public function __construct(string $table = null)
+  public function __construct(?string $table = null)
   {
     $this->table = $table;
   }

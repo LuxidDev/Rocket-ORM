@@ -581,7 +581,7 @@ abstract class Entity implements JsonSerializable
     /**
      * Find all entities matching conditions
      */
-    public static function findAll(array $conditions = [], array $orderBy = [], int $limit = null): array
+    public static function findAll(array $conditions = [], array $orderBy = [], ?int $limit = null): array
     {
         $query = static::query();
 
