@@ -191,9 +191,49 @@ final class QueryBuilderTest extends TestCase
     #[Test]
     public function it_combines_and_with_or_conditions(): void
     {
+        // Conditions render in the order they were declared, so an orWhere()
+        // after a where() reads as `a OR b` rather than `a AND (b)`.
         $sql = $this->query()->where('a', 1)->orWhere('b', 2)->toSql();
 
-        $this->assertMatchesRegularExpression('/WHERE a = :\w+ AND \(b = :\w+\)/', $sql);
+        $this->assertMatchesRegularExpression('/WHERE a = :\w+ OR b = :\w+/', $sql);
+    }
+
+    #[Test]
+    public function it_preserves_declaration_order_across_connectors(): void
+    {
+        $sql = $this->query()
+            ->where('a', 1)
+            ->orWhere('b', 2)
+            ->where('c', 3)
+            ->toSql();
+
+        $this->assertMatchesRegularExpression('/WHERE a = :\w+ OR b = :\w+ AND c = :\w+/', $sql);
+    }
+
+    #[Test]
+    public function a_closure_mixing_where_and_orwhere_reads_in_order(): void
+    {
+        // Regression: separate AND and OR buckets rendered this as
+        // `(a AND (c))`, an impossible condition that matched nothing.
+        $sql = $this->query()
+            ->where('status', 'active')
+            ->where(function (QueryBuilder $q): void {
+                $q->where('email', 'a')->orWhere('email', 'c');
+            })
+            ->toSql();
+
+        $this->assertMatchesRegularExpression(
+            '/WHERE status = :\w+ AND \(email = :\w+ OR email = :\w+\)/',
+            $sql
+        );
+    }
+
+    #[Test]
+    public function a_leading_orwhere_renders_without_a_connector(): void
+    {
+        $sql = $this->query()->orWhere('a', 1)->toSql();
+
+        $this->assertMatchesRegularExpression('/WHERE a = :\w+$/', $sql);
     }
 
     #[Test]
