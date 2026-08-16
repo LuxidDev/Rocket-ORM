@@ -13,31 +13,31 @@ use Rocket\Attributes\Rules\Min;
 class TestUser extends Entity
 {
   #[Column(primary: true, autoIncrement: true)]
-  public int $id;
+  public int $id = 0;
 
   #[Column]
   #[Required]
   #[Email]
-  public string $email;
+  public string $email = '';
 
   #[Column(hidden: true)]
   #[Required]
   #[Min(8)]
-  public string $password;
+  public string $password = '';
 
   #[Column]
   #[Required]
-  public string $firstname;
+  public string $firstname = '';
 
   #[Column]
   #[Required]
-  public string $lastname;
+  public string $lastname = '';
 
   #[Column(autoCreate: true)]
-  public string $created_at;
+  public string $created_at = '';
 
   #[Column(autoCreate: true, autoUpdate: true)]
-  public string $updated_at;
+  public string $updated_at = '';
 
   // Computed property - use a method with get prefix
   public function getDisplayName(): string
