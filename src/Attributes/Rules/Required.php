@@ -1,40 +1,56 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Rocket\Attributes\Rules;
 
 use Attribute;
+use Rocket\ORM\Entity;
 
+/**
+ * Requires the value to be present.
+ *
+ * `0` and `"0"` count as present; only null, the empty string, a whitespace-only
+ * string and the empty array are treated as missing.
+ *
+ * @package Rocket\Attributes\Rules
+ */
 #[Attribute(Attribute::TARGET_PROPERTY)]
-class Required
+class Required implements Rule
 {
-  protected string $message = 'This field is required.';
+    /**
+     * Message reported when the value is missing.
+     */
+    protected string $message = 'This field is required.';
 
-  public function __construct(?string $message = null)
-  {
-    if ($message) {
-      $this->message = $message;
-    }
-  }
-
-  public function validate($value): bool
-  {
-    if (is_null($value)) {
-      return false;
-    }
-
-    if (is_string($value) && trim($value) === '') {
-      return false;
+    /**
+     * @param string|null $message Custom failure message
+     */
+    public function __construct(?string $message = null)
+    {
+        if ($message !== null) {
+            $this->message = $message;
+        }
     }
 
-    if (is_array($value) && empty($value)) {
-      return false;
+    /**
+     * {@inheritDoc}
+     */
+    public function validate(mixed $value, Entity $entity): bool
+    {
+        return match (true) {
+            $value === null => false,
+            is_string($value) => trim($value) !== '',
+            is_array($value) => $value !== [],
+            default => true,
+        };
     }
 
-    return true;
-  }
-
-  public function getMessage(): string
-  {
-    return $this->message;
-  }
+    /**
+     * {@inheritDoc}
+     */
+    public function getMessage(): string
+    {
+        return $this->message;
+    }
 }
