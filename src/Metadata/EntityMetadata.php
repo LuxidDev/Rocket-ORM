@@ -18,17 +18,157 @@ class EntityMetadata
     protected array $relations = [];
     protected bool $hasAutoIncrement = false;
 
+    /**
+     * Database column name keyed by entity property name.
+     *
+     * The hot paths — hydrating a row, serializing an entity, diffing changes —
+     * used to walk the ColumnMetadata objects and call a getter per field per
+     * row. These flat maps are built once so those loops are plain array reads.
+     *
+     * @var array<string, string>
+     */
+    protected array $propertyToColumn = [];
+
+    /**
+     * Entity property name keyed by database column name.
+     *
+     * @var array<string, string>
+     */
+    protected array $columnToProperty = [];
+
+    /**
+     * Column name keyed by property name, excluding hidden columns.
+     *
+     * @var array<string, string>
+     */
+    protected array $visibleColumns = [];
+
+    /**
+     * Default values keyed by property name, for columns that declare one.
+     *
+     * @var array<string, mixed>
+     */
+    protected array $defaults = [];
+
+    /**
+     * Validation rules keyed by property name, for columns that have any.
+     *
+     * @var array<string, list<object>>
+     */
+    protected array $rulesByProperty = [];
+
+    /**
+     * Property name backing the primary key column.
+     */
+    protected string $primaryProperty = 'id';
+
     public function __construct(string $className)
     {
         $this->className = $className;
-        $this->parseAttributes();
-        $this->parseRelations();
+
+        // One reflection for both passes; building it twice doubled the cost of
+        // first touching an entity.
+        $reflection = new ReflectionClass($className);
+
+        $this->parseAttributes($reflection);
+        $this->parseRelations($reflection);
+        $this->buildLookups();
     }
 
-    protected function parseAttributes(): void
+    /**
+     * Flatten the column metadata into maps the hot paths can index directly.
+     */
+    protected function buildLookups(): void
     {
-        $reflection = new ReflectionClass($this->className);
+        foreach ($this->columns as $column) {
+            $property = $column->getProperty();
+            $name = $column->getName();
 
+            $this->propertyToColumn[$property] = $name;
+            $this->columnToProperty[$name] = $property;
+
+            if (!$column->isHidden()) {
+                $this->visibleColumns[$property] = $name;
+            }
+
+            $default = $column->getDefault();
+
+            if ($default !== null) {
+                $this->defaults[$property] = $default;
+            }
+
+            $rules = $column->getRules();
+
+            if ($rules !== []) {
+                $this->rulesByProperty[$property] = $rules;
+            }
+
+            if ($name === $this->primaryKey) {
+                $this->primaryProperty = $property;
+            }
+        }
+    }
+
+    /**
+     * Get the column name for each property.
+     *
+     * @return array<string, string>
+     */
+    public function propertyToColumn(): array
+    {
+        return $this->propertyToColumn;
+    }
+
+    /**
+     * Get the property name for each column.
+     *
+     * @return array<string, string>
+     */
+    public function columnToProperty(): array
+    {
+        return $this->columnToProperty;
+    }
+
+    /**
+     * Get the column name for each property that is not hidden.
+     *
+     * @return array<string, string>
+     */
+    public function visibleColumns(): array
+    {
+        return $this->visibleColumns;
+    }
+
+    /**
+     * Get the declared default value for each property that has one.
+     *
+     * @return array<string, mixed>
+     */
+    public function defaults(): array
+    {
+        return $this->defaults;
+    }
+
+    /**
+     * Get the validation rules for each property that has any.
+     *
+     * @return array<string, list<object>>
+     */
+    public function rulesByProperty(): array
+    {
+        return $this->rulesByProperty;
+    }
+
+    /**
+     * Get the property backing the primary key column.
+     */
+    public function getPrimaryProperty(): string
+    {
+        return $this->primaryProperty;
+    }
+
+    protected function parseAttributes(ReflectionClass $reflection): void
+    {
         // Parse entity attribute
         $entityAttributes = $reflection->getAttributes(EntityAttribute::class);
         if (!empty($entityAttributes)) {
@@ -67,10 +207,8 @@ class EntityMetadata
         }
     }
 
-    protected function parseRelations(): void
+    protected function parseRelations(ReflectionClass $reflection): void
     {
-        $reflection = new ReflectionClass($this->className);
-
         foreach ($reflection->getProperties() as $property) {
             $attributes = $property->getAttributes();
 
