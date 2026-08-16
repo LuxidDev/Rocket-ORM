@@ -132,7 +132,7 @@ class Connection
     /**
      * Open the PDO handle.
      *
-     * @throws \RuntimeException When the driver refuses the connection
+     * @throws ConnectionException When the driver refuses the connection
      */
     protected function connect(): void
     {
@@ -153,8 +153,13 @@ class Connection
             );
         } catch (PDOException $e) {
             // Re-thrown without the DSN so credentials cannot reach a log or an
-            // error page.
-            throw new \RuntimeException('Database connection failed: ' . $e->getMessage(), (int) $e->getCode());
+            // error page; the driver exception is kept as `previous` for anyone
+            // debugging with a full trace.
+            throw new ConnectionException(
+                'Database connection failed: ' . $e->getMessage(),
+                0,
+                $e
+            );
         }
     }
 
