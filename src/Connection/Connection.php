@@ -253,7 +253,8 @@ class Connection
      * Prepare, bind and execute a statement.
      *
      * Values are bound individually rather than passed to `execute()` so nulls,
-     * booleans and integers keep their type once emulation is off.
+     * booleans and integers keep their type once emulation is off. Placeholder
+     * keys may be written with or without a leading colon.
      *
      * @param string               $sql    SQL with named placeholders
      * @param array<string, mixed> $params Placeholder values
@@ -264,7 +265,7 @@ class Connection
 
         foreach ($params as $name => $value) {
             $statement->bindValue(
-                is_int($name) ? $name + 1 : ':' . $name,
+                is_int($name) ? $name + 1 : ':' . ltrim((string) $name, ':'),
                 $value,
                 match (true) {
                     is_null($value) => PDO::PARAM_NULL,
