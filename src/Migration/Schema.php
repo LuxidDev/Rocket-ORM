@@ -13,10 +13,17 @@ class Schema
   protected array $indexes = [];
   protected bool $isAlter = false;
 
+  /**
+   * @param Connection $db      Connection the DDL runs against
+   * @param string     $table   Table being created or altered
+   * @param bool       $isAlter Whether this is an ALTER rather than a CREATE
+   *
+   * @throws \InvalidArgumentException When the table name is not a valid identifier
+   */
   public function __construct(Connection $db, string $table, bool $isAlter = false)
   {
     $this->db = $db;
-    $this->table = $table;
+    $this->table = Connection::assertIdentifier($table);
     $this->isAlter = $isAlter;
   }
 
@@ -158,9 +165,16 @@ class Schema
     }
   }
 
+  /**
+   * Create the table.
+   *
+   * The storage engine and charset are stated explicitly: utf8mb4 is the only
+   * MySQL charset that covers the whole Unicode range, and leaving it to the
+   * server default is how a schema ends up unable to store an emoji.
+   */
   protected function createTable(): void
   {
-    $sql = "CREATE TABLE {$this->table} (\n";
+    $sql = "CREATE TABLE IF NOT EXISTS {$this->table} (\n";
 
     // Add columns
     $columnDefs = [];
@@ -187,14 +201,21 @@ class Schema
     }
 
     $sql .= implode(",\n", $columnDefs);
-    $sql .= "\n)";
+    $sql .= "\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     $this->db->execute($sql);
   }
 
+  /**
+   * Render a single column definition.
+   *
+   * @param Column $column Column to render
+   *
+   * @throws \InvalidArgumentException When the column name is not a valid identifier
+   */
   protected function buildColumnDefinition(Column $column): string
   {
-    $def = "{$column->getName()} {$column->getType()}";
+    $def = Connection::assertIdentifier($column->getName()) . ' ' . $column->getType();
     $options = $column->getOptions();
 
     if (isset($options['nullable']) && $options['nullable']) {
@@ -207,7 +228,9 @@ class Schema
       if ($options['default'] === 'CURRENT_TIMESTAMP') {
         $def .= " DEFAULT CURRENT_TIMESTAMP";
       } else {
-        $def .= " DEFAULT '{$options['default']}'";
+        // Defaults cannot be bound as parameters in DDL, so the literal is
+        // quoted by the driver rather than interpolated raw.
+        $def .= " DEFAULT " . $this->db->getPdo()->quote((string) $options['default']);
       }
     }
 
