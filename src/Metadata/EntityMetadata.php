@@ -11,6 +11,20 @@ use ReflectionClass;
 
 class EntityMetadata
 {
+    /**
+     * Namespace every validation rule attribute lives under.
+     */
+    private const RULE_NAMESPACE = 'Rocket\\Attributes\\Rules\\';
+
+    /**
+     * Relation attribute class names mapped to the kind they declare.
+     */
+    private const RELATION_KINDS = [
+        HasOne::class => 'hasOne',
+        HasMany::class => 'hasMany',
+        BelongsTo::class => 'belongsTo',
+    ];
+
     protected string $className;
     protected string $tableName;
     protected string $primaryKey = 'id';
@@ -70,8 +84,7 @@ class EntityMetadata
         // first touching an entity.
         $reflection = new ReflectionClass($className);
 
-        $this->parseAttributes($reflection);
-        $this->parseRelations($reflection);
+        $this->parse($reflection);
         $this->buildLookups();
     }
 
@@ -167,119 +180,134 @@ class EntityMetadata
         return $this->primaryProperty;
     }
 
-    protected function parseAttributes(ReflectionClass $reflection): void
+    /**
+     * Read the entity attribute and walk every property once.
+     *
+     * The column, validation-rule and relation attributes used to be collected
+     * in three separate passes, each calling `getAttributes()` on every
+     * property. Reflection attribute lookups are the dominant cost of building
+     * metadata, so they are gathered in a single pass and dispatched by name.
+     *
+     * @param ReflectionClass<object> $reflection Reflection over the entity class
+     */
+    protected function parse(ReflectionClass $reflection): void
     {
-        // Parse entity attribute
         $entityAttributes = $reflection->getAttributes(EntityAttribute::class);
-        if (!empty($entityAttributes)) {
-            $entityAttribute = $entityAttributes[0]->newInstance();
-            $this->tableName = $entityAttribute->getTable();
-        } else {
-            // Default table name from class name
-            $this->tableName = strtolower($reflection->getShortName()) . 's';
-        }
 
-        // Parse properties
+        $this->tableName = $entityAttributes === []
+            ? strtolower($reflection->getShortName()) . 's'
+            : $entityAttributes[0]->newInstance()->getTable();
+
         foreach ($reflection->getProperties() as $property) {
-            $columnAttributes = $property->getAttributes(Column::class);
-            if (!empty($columnAttributes)) {
-                // Create ColumnMetadata
-                $columnMetadata = new ColumnMetadata();
-                $columnMetadata->setProperty($property->getName());
+            $columnAttribute = null;
+            $ruleAttributes = [];
+            $relationAttribute = null;
+            $relationKind = null;
 
-                // Configure from Column attribute
-                $columnAttr = $columnAttributes[0]->newInstance();
-                $columnAttr->configure($columnMetadata);
+            foreach ($property->getAttributes() as $attribute) {
+                $name = $attribute->getName();
 
-                // Parse validation rules
-                $this->parseValidationRules($property, $columnMetadata);
-
-                $this->columns[] = $columnMetadata;
-
-                if ($columnMetadata->isPrimary()) {
-                    $this->primaryKey = $columnMetadata->getName();
+                if ($name === Column::class) {
+                    $columnAttribute ??= $attribute;
+                    continue;
                 }
 
-                if ($columnMetadata->isAutoIncrement()) {
-                    $this->hasAutoIncrement = true;
+                if (str_starts_with($name, self::RULE_NAMESPACE)) {
+                    $ruleAttributes[] = $attribute;
+                    continue;
                 }
+
+                $kind = self::RELATION_KINDS[$name] ?? null;
+
+                if ($kind !== null) {
+                    $relationAttribute = $attribute;
+                    $relationKind = $kind;
+                }
+            }
+
+            if ($columnAttribute !== null) {
+                $this->addColumn($property, $columnAttribute, $ruleAttributes);
+            }
+
+            if ($relationAttribute !== null) {
+                $this->addRelation($property->getName(), $relationKind, $relationAttribute->newInstance());
             }
         }
     }
 
-    protected function parseRelations(ReflectionClass $reflection): void
-    {
-        foreach ($reflection->getProperties() as $property) {
-            $attributes = $property->getAttributes();
+    /**
+     * Build the column metadata for a property and attach its rules.
+     *
+     * @param \ReflectionProperty                        $property        The mapped property
+     * @param \ReflectionAttribute<Column>               $columnAttribute Its Column attribute
+     * @param list<\ReflectionAttribute<object>>          $ruleAttributes  Its validation rule attributes
+     */
+    protected function addColumn(
+        \ReflectionProperty $property,
+        \ReflectionAttribute $columnAttribute,
+        array $ruleAttributes
+    ): void {
+        $column = new ColumnMetadata();
+        $column->setProperty($property->getName());
+        $columnAttribute->newInstance()->configure($column);
 
-            foreach ($attributes as $attribute) {
-                $attributeName = $attribute->getName();
+        foreach ($ruleAttributes as $ruleAttribute) {
+            $rule = $ruleAttribute->newInstance();
 
-                if ($attributeName === HasOne::class) {
-                    $relation = $attribute->newInstance();
-                    $relatedClass = $relation->getRelatedClass();
-                    $foreignKey = $relation->getForeignKey() ?? $this->getDefaultForeignKey($relatedClass);
-                    $localKey = $relation->getLocalKey() ?? 'id';
-
-                    $this->relations[] = new RelationMetadata(
-                        $property->getName(),
-                        'hasOne',
-                        $relatedClass,
-                        $foreignKey,
-                        $localKey
-                    );
-                } elseif ($attributeName === HasMany::class) {
-                    $relation = $attribute->newInstance();
-                    $relatedClass = $relation->getRelatedClass();
-                    $foreignKey = $relation->getForeignKey() ?? $this->getDefaultForeignKey($this->className);
-                    $localKey = $relation->getLocalKey() ?? 'id';
-
-                    $this->relations[] = new RelationMetadata(
-                        $property->getName(),
-                        'hasMany',
-                        $relatedClass,
-                        $foreignKey,
-                        $localKey
-                    );
-                } elseif ($attributeName === BelongsTo::class) {
-                    $relation = $attribute->newInstance();
-                    $relatedClass = $relation->getRelatedClass();
-                    $foreignKey = $relation->getForeignKey() ?? $this->getDefaultForeignKey($relatedClass);
-                    $ownerKey = $relation->getOwnerKey() ?? 'id';
-
-                    $this->relations[] = new RelationMetadata(
-                        $property->getName(),
-                        'belongsTo',
-                        $relatedClass,
-                        $foreignKey,
-                        null,
-                        $ownerKey
-                    );
-                }
+            // Attributes cannot see the property they decorate, so rules that
+            // need the mapping are handed it here.
+            if ($rule instanceof \Rocket\Attributes\Rules\ColumnAware) {
+                $rule->setColumn($column->getName(), $property->getName());
             }
+
+            $column->addRule($rule);
+        }
+
+        $this->columns[] = $column;
+
+        if ($column->isPrimary()) {
+            $this->primaryKey = $column->getName();
+        }
+
+        if ($column->isAutoIncrement()) {
+            $this->hasAutoIncrement = true;
         }
     }
 
-    protected function parseValidationRules(\ReflectionProperty $property, ColumnMetadata $columnMetadata): void
+    /**
+     * Record a relation declared on a property.
+     *
+     * @param string $property Property the relation is declared on
+     * @param string $kind     `hasOne`, `hasMany` or `belongsTo`
+     * @param object $relation The instantiated relation attribute
+     */
+    protected function addRelation(string $property, string $kind, object $relation): void
     {
-        $attributes = $property->getAttributes();
+        $relatedClass = $relation->getRelatedClass();
 
-        foreach ($attributes as $attribute) {
-            $attributeName = $attribute->getName();
+        if ($kind === 'belongsTo') {
+            $this->relations[] = new RelationMetadata(
+                $property,
+                'belongsTo',
+                $relatedClass,
+                $relation->getForeignKey() ?? $this->getDefaultForeignKey($relatedClass),
+                null,
+                $relation->getOwnerKey() ?? 'id'
+            );
 
-            // Check if it's a validation rule
-            if (strpos($attributeName, 'Rocket\\Attributes\\Rules\\') === 0) {
-                $rule = $attribute->newInstance();
-
-                // Attributes cannot see the property they decorate, so rules that
-                // need the mapping are handed it here.
-                if ($rule instanceof \Rocket\Attributes\Rules\ColumnAware) {
-                    $rule->setColumn($columnMetadata->getName(), $property->getName());
-                }
-
-                $columnMetadata->addRule($rule);
-            }
+            return;
         }
+
+        // hasMany keys off this entity's own name; hasOne off the related one.
+        $foreignKeyOwner = $kind === 'hasMany' ? $this->className : $relatedClass;
+
+        $this->relations[] = new RelationMetadata(
+            $property,
+            $kind,
+            $relatedClass,
+            $relation->getForeignKey() ?? $this->getDefaultForeignKey($foreignKeyOwner),
+            $relation->getLocalKey() ?? 'id'
+        );
     }
 
     protected function getDefaultForeignKey(string $class): string
