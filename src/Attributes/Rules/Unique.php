@@ -17,7 +17,7 @@ use Rocket\ORM\Entity;
  * @package Rocket\Attributes\Rules
  */
 #[Attribute(Attribute::TARGET_PROPERTY)]
-class Unique implements ColumnAware
+class Unique implements Rule, ColumnAware
 {
     /**
      * Table to search, or null to use the entity's own table.
