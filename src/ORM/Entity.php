@@ -179,10 +179,44 @@ abstract class Entity implements JsonSerializable
     }
 
     /**
-     * Load data into the entity
+     * Read a property, tolerating uninitialized typed properties.
+     *
+     * Typed properties without a default are in an "uninitialized" state that
+     * throws on read, so every internal access goes through here.
+     *
+     * @param string $property Property name
+     */
+    protected function readProperty(string $property): mixed
+    {
+        if (!property_exists($this, $property)) {
+            return null;
+        }
+
+        return isset($this->$property) ? $this->$property : null;
+    }
+
+    /**
+     * Load a database row into the entity.
+     *
+     * Rows are keyed by column name, which is not always the property name, so
+     * the mapping is resolved through the entity metadata before assignment.
+     *
+     * @param array<string, mixed> $data Row keyed by column name
      */
     public function load(array $data): self
     {
+        $metadata = static::getMetadata();
+
+        foreach ($metadata->getColumns() as $column) {
+            $name = $column->getName();
+
+            if (array_key_exists($name, $data)) {
+                $this->{$column->getProperty()} = $data[$name];
+            }
+        }
+
+        // Preserve any extra selected columns that are not mapped, such as
+        // aggregates produced by a custom select.
         foreach ($data as $key => $value) {
             if (property_exists($this, $key)) {
                 $this->$key = $value;
@@ -193,31 +227,49 @@ abstract class Entity implements JsonSerializable
     }
 
     /**
-     * Get the original value of an attribute
+     * Get the value an attribute held when it was last loaded or saved.
+     *
+     * @param string $attribute Property name
      */
-    public function getOriginal(string $attribute)
+    public function getOriginal(string $attribute): mixed
     {
         return $this->original[$attribute] ?? null;
     }
 
     /**
-     * Check if an attribute has been modified
+     * Check whether an attribute has changed since it was last synced.
+     *
+     * @param string $attribute Property name
      */
     public function isDirty(string $attribute): bool
     {
-        return isset($this->original[$attribute]) && $this->original[$attribute] !== $this->$attribute;
+        return array_key_exists($attribute, $this->original)
+            && $this->original[$attribute] !== $this->readProperty($attribute);
     }
 
     /**
-     * Get all modified attributes
+     * Get every changed attribute, keyed by database column name.
+     *
+     * Keys are column names rather than property names because the result feeds
+     * straight into an UPDATE statement.
+     *
+     * @return array<string, mixed>
      */
     public function getDirty(): array
     {
         $dirty = [];
 
-        foreach ($this->original as $key => $value) {
-            if ($value !== $this->$key) {
-                $dirty[$key] = $this->$key;
+        foreach (static::getMetadata()->getColumns() as $column) {
+            $property = $column->getProperty();
+
+            if (!array_key_exists($property, $this->original)) {
+                continue;
+            }
+
+            $current = $this->readProperty($property);
+
+            if ($this->original[$property] !== $current) {
+                $dirty[$column->getName()] = $current;
             }
         }
 
@@ -308,15 +360,10 @@ abstract class Entity implements JsonSerializable
      */
     public static function random(int $limit = 1): array
     {
-        $query = static::query()->orderBy('RAND()');
-
-        if ($limit > 1) {
-            $query->limit($limit);
-            return $query->all();
-        }
-
-        $result = $query->first();
-        return $result ? [$result] : [];
+        return static::query()
+            ->inRandomOrder()
+            ->limit(max(1, $limit))
+            ->all();
     }
 
     /**
@@ -336,7 +383,7 @@ abstract class Entity implements JsonSerializable
                 continue;
             }
 
-            $value = $this->$property ?? null;
+            $value = $this->readProperty($property);
 
             // Skip auto-generated columns (like auto-increment ID)
             if ($column->isAutoIncrement() && (empty($value) || $value === 0)) {
@@ -411,7 +458,7 @@ abstract class Entity implements JsonSerializable
 
         foreach ($metadata->getColumns() as $column) {
             $property = $column->getProperty();
-            $this->original[$property] = $this->$property;
+            $this->original[$property] = $this->readProperty($property);
         }
     }
 
@@ -425,7 +472,7 @@ abstract class Entity implements JsonSerializable
 
         foreach ($metadata->getColumns() as $column) {
             $property = $column->getProperty();
-            $value = $this->$property;
+            $value = $this->readProperty($property);
             $rules = $column->getRules();
 
             foreach ($rules as $rule) {
@@ -621,7 +668,7 @@ abstract class Entity implements JsonSerializable
             $property = $column->getProperty();
 
             if (!$column->isHidden()) {
-                $data[$column->getName()] = $this->$property;
+                $data[$column->getName()] = $this->readProperty($property);
             }
         }
 
