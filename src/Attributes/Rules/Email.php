@@ -1,32 +1,54 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Rocket\Attributes\Rules;
 
 use Attribute;
+use Rocket\ORM\Entity;
 
+/**
+ * Requires the value to be a syntactically valid email address.
+ *
+ * Presence is {@see Required}'s job, so a null or empty value passes.
+ *
+ * @package Rocket\Attributes\Rules
+ */
 #[Attribute(Attribute::TARGET_PROPERTY)]
-class Email
+class Email implements Rule
 {
-  protected string $message = 'This field must be a valid email address.';
+    /**
+     * Message reported when the value is not an email address.
+     */
+    protected string $message = 'This field must be a valid email address.';
 
-  public function __construct(?string $message = null)
-  {
-    if ($message) {
-      $this->message = $message;
+    /**
+     * @param string|null $message Custom failure message
+     */
+    public function __construct(?string $message = null)
+    {
+        if ($message !== null) {
+            $this->message = $message;
+        }
     }
-  }
 
-  public function validate($value): bool
-  {
-    if (empty($value)) {
-      return true; // Use Required to enforce presence
+    /**
+     * {@inheritDoc}
+     */
+    public function validate(mixed $value, Entity $entity): bool
+    {
+        if ($value === null || $value === '') {
+            return true;
+        }
+
+        return is_string($value) && filter_var($value, FILTER_VALIDATE_EMAIL) !== false;
     }
 
-    return filter_var($value, FILTER_VALIDATE_EMAIL) !== false;
-  }
-
-  public function getMessage(): string
-  {
-    return $this->message;
-  }
+    /**
+     * {@inheritDoc}
+     */
+    public function getMessage(): string
+    {
+        return $this->message;
+    }
 }
