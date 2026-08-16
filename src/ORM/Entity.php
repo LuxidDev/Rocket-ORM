@@ -179,6 +179,45 @@ abstract class Entity implements JsonSerializable
     }
 
     /**
+     * Check whether the entity has yet to be persisted.
+     */
+    public function isNew(): bool
+    {
+        return $this->isNew;
+    }
+
+    /**
+     * Mark whether the entity has been persisted.
+     *
+     * @param bool $isNew True when the entity is not yet in the database
+     */
+    public function setIsNew(bool $isNew): self
+    {
+        $this->isNew = $isNew;
+
+        return $this;
+    }
+
+    /**
+     * Get the primary key value, or null when it has not been assigned.
+     *
+     * Resolves through the metadata because `primaryKey()` returns the column
+     * name, which is not always the property name.
+     */
+    public function getKey(): mixed
+    {
+        $primaryKey = static::primaryKey();
+
+        foreach (static::getMetadata()->getColumns() as $column) {
+            if ($column->getName() === $primaryKey) {
+                return $this->readProperty($column->getProperty());
+            }
+        }
+
+        return $this->readProperty($primaryKey);
+    }
+
+    /**
      * Read a property, tolerating uninitialized typed properties.
      *
      * Typed properties without a default are in an "uninitialized" state that
